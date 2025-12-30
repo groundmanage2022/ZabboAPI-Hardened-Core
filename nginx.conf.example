@@ -1,0 +1,128 @@
+server {
+    listen 80;
+    listen [::]:80;
+    server_name api.habbis.nl;
+
+    # Redirect HTTP to HTTPS
+    return 301 https://$server_name$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name api.habbis.nl;
+
+    # SSL Configuration (update paths to your certificates)
+    ssl_certificate /path/to/your/certificate.crt;
+    ssl_certificate_key /path/to/your/private.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    ssl_prefer_server_ciphers on;
+
+    root /var/www/api;
+    index index.php index.html;
+
+    # Security: Disable directory listing
+    autoindex off;
+
+    # Request size limits
+    client_max_body_size 10M;
+    client_body_buffer_size 128k;
+
+    # CORS Headers - Allow All Origins
+    add_header 'Access-Control-Allow-Origin' '*' always;
+    add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS, HEAD' always;
+    add_header 'Access-Control-Allow-Headers' 'Content-Type, Authorization, X-Requested-With, Accept, Origin' always;
+    add_header 'Access-Control-Max-Age' '86400' always;
+
+    # Security Headers
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    # Handle preflight OPTIONS requests
+    if ($request_method = 'OPTIONS') {
+        add_header 'Access-Control-Allow-Origin' '*' always;
+        add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS, HEAD' always;
+        add_header 'Access-Control-Allow-Headers' 'Content-Type, Authorization, X-Requested-With, Accept, Origin' always;
+        add_header 'Access-Control-Max-Age' '86400' always;
+        add_header 'Content-Length' '0';
+        add_header 'Content-Type' 'text/plain';
+        return 200;
+    }
+
+    # Deny access to sensitive files
+    location ~ ^/(config\.php|\.git|\.env|\.htaccess|web\.config)$ {
+        deny all;
+        return 404;
+    }
+
+    # Deny access to backup and log files
+    location ~ \.(bak|log|sql|config|ini)$ {
+        deny all;
+        return 404;
+    }
+
+    # Deny access to hidden files
+    location ~ /\. {
+        deny all;
+        return 404;
+    }
+
+    # Allow emojis.json to be publicly accessible
+    location = /emojis.json {
+        allow all;
+        add_header 'Access-Control-Allow-Origin' '*' always;
+        add_header Cache-Control "public, max-age=3600";
+    }
+
+    # Audio files directory
+    location ~ ^/audios/[a-zA-Z0-9]+\.mp3$ {
+        allow all;
+        add_header 'Access-Control-Allow-Origin' '*' always;
+        add_header Cache-Control "public, max-age=2592000";
+    }
+
+    # Deny PHP execution in audios directory
+    location ~ ^/audios/.*\.php$ {
+        deny all;
+        return 404;
+    }
+
+    # PHP processing
+    location ~ \.php$ {
+        # Only allow specific PHP files
+        if ($uri !~ ^/(index|audio|extra|User|Rcon|Database)\.php$) {
+            return 404;
+        }
+
+        include fastcgi_params;
+        fastcgi_pass unix:/var/run/php/php8.0-fpm.sock;  # Adjust PHP version as needed
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        fastcgi_param PATH_INFO $fastcgi_path_info;
+        fastcgi_intercept_errors on;
+        fastcgi_buffer_size 128k;
+        fastcgi_buffers 256 16k;
+        fastcgi_busy_buffers_size 256k;
+        fastcgi_temp_file_write_size 256k;
+    }
+
+    # Gzip compression
+    gzip on;
+    gzip_vary on;
+    gzip_proxied any;
+    gzip_comp_level 6;
+    gzip_types text/plain text/css text/xml text/javascript application/json application/javascript application/xml+rss;
+
+    # Caching
+    location ~* \.(jpg|jpeg|gif|png|css|js|ico|xml)$ {
+        expires 30d;
+        add_header Cache-Control "public, immutable";
+    }
+
+    # Default location
+    location / {
+        try_files $uri $uri/ =404;
+    }
+}
